@@ -23,7 +23,14 @@ class UtilityBot(commands.Bot):
 
     async def on_ready(self):
         print(f'Started {self.user.name}')
-
+        
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandNotFound):
+            await ctx.send(f"Command '{ctx.invoked_with}' not found. Use '{ctx.prefix}help' for a list of commands.")
+        elif isinstance(error, commands.MissingPermissions):
+            await ctx.send("You don't have permission to use this command.")
+        else:
+            print(f"An error occurred: {error}")  
     
     async def unlock_after(self, server_id, minutes):
         await asyncio.sleep(minutes * 60)  # Convert minutes to seconds
