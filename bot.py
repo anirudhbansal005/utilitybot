@@ -9,11 +9,9 @@ class UtilityBot(commands.Bot):
     def __init__(self, command_prefix="/"): 
         super().__init__(command_prefix=command_prefix, intents=discord.Intents.all())
         self.load_token()
-        self.setup_mongo()
-        
+        self.active_locks = {}  # Dictionary to store active lock tasks
 
     def load_token(self):
-        
         self.token = decouple.config('TOKEN')  
 
     def setup_mongo(self):
@@ -23,7 +21,6 @@ class UtilityBot(commands.Bot):
         self.mongo_client = motor.motor_asyncio.AsyncIOMotorClient(mongo_connection_string)
         self.db = self.mongo_client[database_name]
 
- 
     async def on_ready(self):
         print(f'Started {self.user.name}')
         
@@ -35,41 +32,90 @@ class UtilityBot(commands.Bot):
     async def test(self, ctx):
         await ctx.send(f'test, {ctx.author.mention}!')
 
-    @commands.command(name='locktime')
-    async def locktime(self, ctx, start_hour: int, duration_hours: int):
-        """Set the start hour and duration for server lockdown.\nExample: //locktime 00h 8h"""
-        collection = self.db['lockdown_times']
-        document = {'start_hour': start_hour, 'duration_hours': duration_hours}
-        await collection.replace_one({}, document, upsert=True)
-        await ctx.send(f"Lockdown time set. Server will be locked down daily starting at {start_hour}:00 for {duration_hours} hours.")
         
-    @tasks.loop(hours=24)  # Runs every 24 hours
-    async def lockdown_task(self):
-        server_id = t  
+    @commands.command(name="lock")
+    async def lock_server(self, ctx, duration=None):
+        server_id = ctx.guild.id  # Get the server ID from the context
         guild = self.get_guild(server_id)
         everyone_role = guild.default_role
-        collection = self.db['lockdown_times']
-        document = await collection.find_one({})
-        if document:
-            start_hour = document.get('start_hour', 0)
-            duration_hours = document.get('duration_hours', 8)
-            current_hour = datetime.now().hour
-            lockdown_start_time = datetime.now().replace(hour=start_hour, minute=0, second=0, microsecond=0)
-            if current_hour == start_hour and datetime.now() >= lockdown_start_time:
-                await everyone_role.edit(send_messages=False)
-                print(f"Server locked down at {datetime.now()}")
-                await asyncio.sleep(duration_hours * 3600)
-                await everyone_role.edit(send_messages=True)
-                print(f"Server unlocked at {datetime.now()}")
 
- 
-       
+        # Check permission before modifying role
+        if not ctx.author.guild_permissions.manage_roles:
+            await ctx.send("You don't have permission to use this command.")
+            return
+        # Validate duration if provided
+        if duration:
+            try:
+                minutes = int(duration)
+            except ValueError:
+                await ctx.send(f"Invalid duration format. Please specify a number of minutes.")
+                return
+
+            if minutes <= 0:
+                await ctx.send("Please specify a positive duration.")
+                return
+        try:
+            await everyone_role.edit(send_messages=False)
+            await ctx.send(f"Server locked down by {ctx.author.mention} for {duration} minutes" if duration else f"Server locked down by {ctx.author.mention}")
+
+            # Start a task to unlock after duration (if provided)
+            if duration:
+                task = self.loop.create_task(self.unlock_after(server_id, minutes))
+                self.active_locks[server_id] = task
+
+        except discord.HTTPException as e:
+            await ctx.send(f"Failed to lock server: {e}")
+
+    @commands.command(name="unlock")
+    async def unlock_server(self, ctx):
+        server_id = ctx.guild.id  
+
+        
+        if not ctx.author.guild_permissions.manage_roles:
+            await ctx.send("You don't have permission to use this command.")
+            return
+
+        
+        if server_id in self.active_locks:
+            task = self.active_locks[server_id]
+            task.cancel()
+            del self.active_locks[server_id]
+
+            guild = self.get_guild(server_id)
+            everyone_role = guild.default_role
+            try:
+                await everyone_role.edit(send_messages=True)
+                await ctx.send(f"Unlock scheduled by {ctx.author.mention} has been cancelled and server is unlocked.")
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to unlock server (server_id: {server_id}): {e}")
+        elif not everyone_role.permissions.send_messages:
+            
+            guild = self.get_guild(server_id)
+            everyone_role = guild.default_role
+            try:
+                await everyone_role.edit(send_messages=True)
+                await ctx.send(f"Server unlocked by {ctx.author.mention}.")
+            except discord.HTTPException as e:
+                await ctx.send(f"Failed to unlock server (server_id: {server_id}): {e}")
+        else:
+            await ctx.send("No scheduled unlock found and server is already unlocked.")
+
+     async def unlock_after(self, server_id, minutes):
+        await asyncio.sleep(minutes * 60)  # Convert minutes to seconds
+        guild = self.get_guild(server_id)
+        everyone_role = guild.default_role
+
+        try:
+            await everyone_role.edit(send_messages=True)
+            await self.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID).send(f"Server automatically unlocked after {minutes} minutes.") 
+        except discord.HTTPException as e:
+            print(f"Failed to unlock server (server_id: {server_id}): {e}")
+
 
 def run_bot():
     intents = discord.Intents.all()
-    bot = UtilityBot(command_prefix="/") 
+    bot = UtilityBot(command_prefix="//") 
     bot.run(bot.token)
-    bot.lockdown_task.start()
 
 if __name__ == "__main__":
     run_bot()
