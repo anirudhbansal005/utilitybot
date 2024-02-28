@@ -34,11 +34,13 @@ class UtilityBot(commands.Bot):
     
     async def unlock_after(self, server_id, minutes):
         await asyncio.sleep(minutes * 60)  # Convert minutes to seconds
-        guild = self.get_guild(server_id)
+        guild = self.bot.get_guild(server_id)
         everyone_role = guild.default_role
 
         try:
-            await everyone_role.edit(send_messages=True)
+            permissions = discord.Permissions()
+            permissions.update(send_messages = True)
+            await everyone_role.edit(permissions=permissions)
             await self.get_channel(YOUR_ANNOUNCEMENT_CHANNEL_ID).send(f"Server automatically unlocked after {minutes} minutes.") 
         except discord.HTTPException as e:
             print(f"Failed to unlock server (server_id: {server_id}): {e}")
