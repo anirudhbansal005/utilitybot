@@ -83,7 +83,7 @@ class UtilityCom(commands.Cog):
             everyone_role = guild.default_role
             try:
                 permissions = discord.Permissions()
-                permissions.updatesend_messages =True)
+                permissions.update(send_messages =True)
                 await everyone_role.edit(send_messages=True)
                 await ctx.send(f"Server unlocked by {ctx.author.mention}.")
             except discord.HTTPException as e:
